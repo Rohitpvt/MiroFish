@@ -257,10 +257,11 @@ class ZepGraphMemoryUpdater:
         self.simulation_id = simulation_id or "unknown"
         self.api_key = api_key or Config.ZEP_API_KEY
         
-        if not self.api_key:
+        from ..utils.local_graph import is_local_zep_mode
+        if not self.api_key and not is_local_zep_mode(self.api_key):
             raise ValueError("ZEP_API_KEY未配置")
         
-        self.client = get_zep_client(self.api_key)
+        self.client = None if is_local_zep_mode(self.api_key) else get_zep_client(self.api_key)
         
         # 活动队列
         self._activity_queue: Queue = Queue()
@@ -407,7 +408,7 @@ class ZepGraphMemoryUpdater:
         
         self.add_activity(activity)
     
-    def _worker_loop(self, locale: str = 'zh'):
+    def _worker_loop(self, locale: str = 'en'):
         """后台工作循环 - 按平台批量发送活动到Zep"""
         set_locale(locale)
         while self._running or not self._activity_queue.empty():
@@ -485,6 +486,8 @@ class ZepGraphMemoryUpdater:
         """
         if not activities:
             return 0
+        if self.client is None:
+            return len(activities)
 
         processed_count = 0
         for payload_activities, combined_text in self._build_episode_payloads(activities):
@@ -597,6 +600,8 @@ class ZepGraphMemoryUpdater:
                     del self._platform_buffers[platform][:processed_count]
 
     def _wait_for_pending_episodes(self, *, deadline: float | None = None) -> None:
+        if self.client is None:
+            return
         pending = set(self._pending_episode_uuids)
         if not pending:
             return

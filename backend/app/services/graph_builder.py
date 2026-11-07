@@ -66,10 +66,11 @@ class GraphBuilderService:
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
+        from ..utils.local_graph import is_local_zep_mode
+        if not self.api_key and not is_local_zep_mode(self.api_key):
             raise ValueError("ZEP_API_KEY 未配置")
         
-        self.client = get_zep_client(self.api_key)
+        self.client = None if is_local_zep_mode(self.api_key) else get_zep_client(self.api_key)
         self.task_manager = TaskManager()
     
     def build_graph_async(
@@ -127,7 +128,7 @@ class GraphBuilderService:
         chunk_size: int,
         chunk_overlap: int,
         batch_size: int,
-        locale: str = 'zh'
+        locale: str = 'en'
     ):
         """图谱构建工作线程"""
         set_locale(locale)
@@ -212,7 +213,14 @@ class GraphBuilderService:
             
         except Exception as e:
             import traceback
-            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            error_str = str(e)
+            if "401" in error_str or "unauthorized" in error_str.lower() or Config.ZEP_API_KEY == "your_zep_api_key_here":
+                error_msg = (
+                    "Zep Cloud API Key is invalid or unauthorized (HTTP 401). "
+                    "Please get a free API key from https://app.getzep.com/ and set ZEP_API_KEY in your .env file."
+                )
+            else:
+                error_msg = f"{str(e)}\n{traceback.format_exc()}"
             self.task_manager.fail_task(task_id, error_msg)
     
     def create_graph(
@@ -875,5 +883,13 @@ class GraphBuilderService:
         }
     
     def delete_graph(self, graph_id: str):
-        """删除图谱"""
+        if self.client is None:
+            from ..utils.local_graph import local_graph_exists, get_graph_file_path
+            import os
+            if local_graph_exists(graph_id):
+                try:
+                    os.remove(get_graph_file_path(graph_id))
+                except Exception:
+                    pass
+            return
         self.client.graph.delete(graph_id=graph_id)

@@ -79,10 +79,11 @@ class ZepEntityReader:
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
+        from ..utils.local_graph import is_local_zep_mode
+        if not self.api_key and not is_local_zep_mode(self.api_key):
             raise ValueError("ZEP_API_KEY 未配置")
         
-        self.client = get_zep_client(self.api_key)
+        self.client = None if is_local_zep_mode(self.api_key) else get_zep_client(self.api_key)
     
     def _call_with_retry(
         self, 
@@ -122,6 +123,22 @@ class ZepEntityReader:
         """
         logger.info(f"获取图谱 {graph_id} 的所有节点...")
 
+        if self.client is None:
+            from ..utils.local_graph import local_graph_exists, load_local_graph
+            if local_graph_exists(graph_id):
+                local_data = load_local_graph(graph_id)
+                nodes_data = []
+                for node in local_data.get("nodes", []):
+                    nodes_data.append({
+                        "uuid": node.get("uuid", ""),
+                        "name": node.get("name", ""),
+                        "labels": node.get("labels", []),
+                        "summary": node.get("summary", ""),
+                        "attributes": node.get("attributes", {}),
+                    })
+                logger.info(f"??? {len(nodes_data)} ?????")
+                return nodes_data
+            return []
         nodes = fetch_all_nodes(self.client, graph_id)
 
         nodes_data = []
@@ -149,6 +166,23 @@ class ZepEntityReader:
         """
         logger.info(f"获取图谱 {graph_id} 的所有边...")
 
+        if self.client is None:
+            from ..utils.local_graph import local_graph_exists, load_local_graph
+            if local_graph_exists(graph_id):
+                local_data = load_local_graph(graph_id)
+                edges_data = []
+                for edge in local_data.get("edges", []):
+                    edges_data.append({
+                        "uuid": edge.get("uuid", ""),
+                        "name": edge.get("name", ""),
+                        "fact": edge.get("fact", ""),
+                        "source_node_uuid": edge.get("source_node_uuid", ""),
+                        "target_node_uuid": edge.get("target_node_uuid", ""),
+                        "attributes": edge.get("attributes", {}),
+                    })
+                logger.info(f"??? {len(edges_data)} ????")
+                return edges_data
+            return []
         edges = fetch_all_edges(self.client, graph_id)
 
         edges_data = []

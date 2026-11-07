@@ -484,7 +484,8 @@ def _build_graph_impl():
         
         # 检查配置
         errors = []
-        if not Config.ZEP_API_KEY:
+        from ..utils.local_graph import is_local_zep_mode, local_graph_exists, load_local_graph, build_local_graph_with_llm
+        if not Config.ZEP_API_KEY and not is_local_zep_mode():
             errors.append(t('api.zepApiKeyMissing'))
         if errors:
             logger.error(f"配置错误: {errors}")
@@ -695,7 +696,26 @@ def _build_graph_impl():
                         progress=55,
                     )
                 else:
-                    # 创建图谱
+                    if is_local_zep_mode():
+                        import uuid
+                        task_manager.update_task(task_id, message="Extracting knowledge graph with Gemini...", progress=25)
+                        graph_id = project.graph_id or f"mirofish_{uuid.uuid4().hex[:16]}"
+                        project.graph_id = graph_id
+                        ProjectManager.save_project(project)
+                        def prog_cb(m, p):
+                            task_manager.update_task(task_id, message=m, progress=p)
+                        graph_data = build_local_graph_with_llm(text, ontology, graph_name, graph_id=graph_id, progress_callback=prog_cb)
+                        node_count = graph_data.get("total_nodes", len(graph_data.get("nodes", [])))
+                        edge_count = graph_data.get("total_edges", len(graph_data.get("edges", [])))
+                        build_logger.info(f"[{task_id}] Local graph completed: {node_count} nodes, {edge_count} edges")
+                        with _project_build_lock(project_id):
+                            project.status = ProjectStatus.GRAPH_COMPLETED
+                            project.error = None
+                            ProjectManager.save_project(project)
+                            task_manager.update_task(task_id, status=TaskStatus.COMPLETED, message=t('progress.graphBuildComplete'), progress=100, result={"project_id": project_id, "graph_id": graph_id, "node_count": node_count, "edge_count": edge_count})
+                        return
+
+                    # ????
                     task_manager.update_task(
                         task_id,
                         message=t('progress.creatingZepGraph'),
@@ -711,7 +731,7 @@ def _build_graph_impl():
                         graph_id_callback=remember_graph,
                     )
 
-                    # 设置本体
+                    # ????
                     task_manager.update_task(
                         task_id,
                         message=t('progress.settingOntology'),
@@ -882,12 +902,27 @@ def get_graph_data(graph_id: str):
     获取图谱数据（节点和边）
     """
     try:
-        if not Config.ZEP_API_KEY:
+        from ..utils.local_graph import local_graph_exists, load_local_graph, is_local_zep_mode
+        if local_graph_exists(graph_id) or is_local_zep_mode():
+            if local_graph_exists(graph_id):
+                local_data = load_local_graph(graph_id)
+                d3_nodes = [{"id": n["uuid"], "name": n["name"], "label": n.get("labels", ["Entity"])[0], "type": n.get("labels", ["Entity"])[0], "summary": n.get("summary", ""), "attributes": n.get("attributes", {})} for n in local_data.get("nodes", [])]
+                d3_edges = [{"id": e["uuid"], "source": e["source_node_uuid"], "target": e["target_node_uuid"], "name": e["name"], "fact": e.get("fact", "")} for e in local_data.get("edges", [])]
+                return jsonify({"success": True, "data": {"nodes": d3_nodes, "edges": d3_edges, "node_count": len(d3_nodes), "edge_count": len(d3_edges), "entity_types": local_data.get("entity_types", [])}})
+            return jsonify({"success": True, "data": {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0, "entity_types": []}})
+
+        from ..utils.local_graph import is_local_zep_mode
+        if not Config.ZEP_API_KEY and not is_local_zep_mode():
             return jsonify({
                 "success": False,
                 "error": t('api.zepApiKeyMissing')
             }), 500
         
+        if local_graph_exists(graph_id):
+            local_data = load_local_graph(graph_id)
+            d3_nodes = [{"id": n["uuid"], "name": n["name"], "label": n.get("labels", ["Entity"])[0], "type": n.get("labels", ["Entity"])[0], "summary": n.get("summary", ""), "attributes": n.get("attributes", {})} for n in local_data.get("nodes", [])]
+            d3_edges = [{"id": e["uuid"], "source": e["source_node_uuid"], "target": e["target_node_uuid"], "name": e["name"], "fact": e.get("fact", "")} for e in local_data.get("edges", [])]
+            return jsonify({"success": True, "data": {"nodes": d3_nodes, "edges": d3_edges, "node_count": len(d3_nodes), "edge_count": len(d3_edges), "entity_types": local_data.get("entity_types", [])}})
         builder = GraphBuilderService(api_key=Config.ZEP_API_KEY)
         graph_data = builder.get_graph_data(graph_id)
         
@@ -910,7 +945,8 @@ def delete_graph(graph_id: str):
     删除Zep图谱
     """
     try:
-        if not Config.ZEP_API_KEY:
+        from ..utils.local_graph import is_local_zep_mode
+        if not Config.ZEP_API_KEY and not is_local_zep_mode():
             return jsonify({
                 "success": False,
                 "error": t('api.zepApiKeyMissing')

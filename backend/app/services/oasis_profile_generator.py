@@ -265,7 +265,8 @@ class OasisProfileGenerator:
         self.zep_client = None
         self.graph_id = graph_id
         
-        if self.zep_api_key:
+        from ..utils.local_graph import is_local_zep_mode
+        if self.zep_api_key and not is_local_zep_mode(self.zep_api_key):
             try:
                 self.zep_client = get_zep_client(self.zep_api_key)
             except Exception as e:
@@ -361,6 +362,28 @@ class OasisProfileGenerator:
         import concurrent.futures
         
         if not self.zep_client:
+            from ..utils.local_graph import local_graph_exists, load_local_graph
+            if self.graph_id and local_graph_exists(self.graph_id):
+                local_data = load_local_graph(self.graph_id)
+                facts = []
+                summaries = []
+                for edge in local_data.get("edges", []):
+                    if entity.name.lower() in edge.get("name", "").lower() or entity.uuid in (edge.get("source_node_uuid"), edge.get("target_node_uuid")):
+                        if edge.get("fact"):
+                            facts.append(edge["fact"])
+                for node in local_data.get("nodes", []):
+                    if node.get("summary"):
+                        summaries.append(f"{node['name']}: {node['summary']}")
+                context_parts = []
+                if facts:
+                    context_parts.append("Related facts and relationships:\n" + "\n".join(f"- {f}" for f in facts[:15]))
+                if summaries:
+                    context_parts.append("Related entities context:\n" + "\n".join(f"- {s}" for s in summaries[:10]))
+                return {
+                    "facts": facts,
+                    "node_summaries": summaries,
+                    "context": "\n\n".join(context_parts)
+                }
             return {"facts": [], "node_summaries": [], "context": ""}
         
         entity_name = entity.name

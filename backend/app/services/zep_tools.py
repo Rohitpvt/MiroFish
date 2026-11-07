@@ -429,10 +429,11 @@ class ZepToolsService:
     
     def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
         self.api_key = api_key or Config.ZEP_API_KEY
-        if not self.api_key:
+        from ..utils.local_graph import is_local_zep_mode
+        if not self.api_key and not is_local_zep_mode(self.api_key):
             raise ValueError("ZEP_API_KEY 未配置")
         
-        self.client = get_zep_client(self.api_key)
+        self.client = None if is_local_zep_mode(self.api_key) else get_zep_client(self.api_key)
         # LLM客户端用于InsightForge生成子问题
         self._llm_client = llm_client
         logger.info(t("console.zepToolsInitialized"))
@@ -480,6 +481,10 @@ class ZepToolsService:
         
         zep_query = normalize_zep_search_query(query)
         zep_limit = normalize_zep_search_limit(limit)
+
+        from ..utils.local_graph import local_graph_exists
+        if self.client is None or local_graph_exists(graph_id):
+            return self._local_search(graph_id, query, limit, scope)
 
         try:
             search_results = self._call_with_retry(
@@ -655,6 +660,19 @@ class ZepToolsService:
         """
         logger.info(t("console.fetchingAllNodes", graphId=graph_id))
 
+        from ..utils.local_graph import local_graph_exists, load_local_graph
+        if self.client is None or local_graph_exists(graph_id):
+            graph_data = load_local_graph(graph_id) if local_graph_exists(graph_id) else {}
+            result = []
+            for node in graph_data.get("nodes", []):
+                result.append(NodeInfo(
+                    uuid=node.get("uuid", ""),
+                    name=node.get("name", ""),
+                    labels=node.get("labels", []),
+                    summary=node.get("summary", ""),
+                    attributes=node.get("attributes", {})
+                ))
+            return result
         nodes = fetch_all_nodes(self.client, graph_id)
 
         result = []
@@ -684,6 +702,19 @@ class ZepToolsService:
         """
         logger.info(t("console.fetchingAllEdges", graphId=graph_id))
 
+        from ..utils.local_graph import local_graph_exists, load_local_graph
+        if self.client is None or local_graph_exists(graph_id):
+            graph_data = load_local_graph(graph_id) if local_graph_exists(graph_id) else {}
+            result = []
+            for edge in graph_data.get("edges", []):
+                result.append(EdgeInfo(
+                    uuid=edge.get("uuid", ""),
+                    name=edge.get("name", ""),
+                    fact=edge.get("fact", ""),
+                    source_node_uuid=edge.get("source_node_uuid", ""),
+                    target_node_uuid=edge.get("target_node_uuid", "")
+                ))
+            return result
         edges = fetch_all_edges(self.client, graph_id)
 
         result = []
@@ -722,6 +753,8 @@ class ZepToolsService:
         logger.info(t("console.fetchingNodeDetail", uuid=node_uuid[:8]))
         
         try:
+            if self.client is None:
+                return None
             node = self._call_with_retry(
                 func=lambda: self.client.graph.node.get(uuid_=node_uuid),
                 operation_name=t("console.fetchNodeDetailOp", uuid=node_uuid[:8])

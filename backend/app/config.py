@@ -1,4 +1,7 @@
-"""\n配置管理\n统一从项目根目录的 .env 文件加载配置\n"""
+"""
+配置管理
+统一从项目根目录的 .env 文件加载配置
+"""
 
 import os
 from dotenv import load_dotenv
@@ -66,8 +69,7 @@ class Config:
         errors: list[str] = []
         if not cls.LLM_API_KEY:
             errors.append("LLM_API_KEY 未配置")
-        if not cls.ZEP_API_KEY:
-            errors.append("ZEP_API_KEY 未配置")
+        # ZEP_API_KEY 可选：如果未配置或为占位符，自动启用内置本地知识图谱引擎
         if os.environ.get("ZEP_API_URL"):
             errors.append("ZEP_API_URL 不受支持；MiroFish 仅连接 Zep Cloud")
         if cls.DEBUG:

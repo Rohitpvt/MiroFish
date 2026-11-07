@@ -18,6 +18,22 @@ if sys.platform == 'win32':
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import socket
+_orig_getaddrinfo = socket.getaddrinfo
+
+def _getaddrinfo_prefer_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+    if family == 0 or family == socket.AF_UNSPEC:
+        try:
+            res = _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+            if res:
+                return res
+        except Exception:
+            pass
+    return _orig_getaddrinfo(host, port, family, type, proto, flags)
+
+socket.getaddrinfo = _getaddrinfo_prefer_ipv4
+
+
 from app import create_app
 from app.config import Config
 
